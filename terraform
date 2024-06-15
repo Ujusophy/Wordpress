@@ -1,0 +1,147 @@
+#AWS Provider
+provider "aws" {
+  region = "us-east-1"
+}
+Create AWS VPC
+
+#create VPC
+resource "aws_vpc" "CreateVPC"{
+    cidr_block = "10.0.0.0/16"
+    tags = {
+        Name = "VPC-terraform"
+    }
+}
+
+#create two public subnet (RDS is designed for high availability)
+resource "aws_subnet" "Publicsubnet1" {
+    vpc_id = aws_vpc.CreateVPC.id
+    cidr_block = "10.0.1.0/24"
+    availability_zone = "us-east-1a"
+}
+
+resource "aws_subnet" "Publicsubnet2" {
+    vpc_id = aws_vpc.CreateVPC.id
+    cidr_block = "10.0.2.0/24"
+    availability_zone = "us-east-1b"
+}
+
+#create two private subnet
+resource "aws_subnet" "Privatesubnet1" {
+    vpc_id = aws_vpc.CreateVPC.id
+    cidr_block = "10.0.3.0/24"
+    availability_zone = "us-east-1a"
+}
+
+resource "aws_subnet" "Privatesubnet2"  {
+    vpc_id = aws_vpc.CreateVPC.id
+    cidr_block = "10.0.4.0/24"
+    availability_zone = "us-east-1b"
+}
+
+#create internet gateway to enable internet connection to public subnet
+resource "aws_internet_gateway" "MyInternet"{
+    vpc_id = aws_vpc.CreateVPC.id
+}
+
+#create route table
+resource "aws_route_table" "Myroutetable"{
+    vpc_id = aws_vpc.CreateVPC.id
+    route {
+        cidr_block = "0.0.0.0/0"
+        gateway_id = aws_internet_gateway.MyInternet.id
+    }
+}
+
+#route table association public subnet
+resource "aws_route_table_association" "PublicRTS1"{
+    subnet_id = aws_subnet.Publicsubnet1.id
+    route_table_id = aws_route_table.Myroutetable.id
+}
+
+resource "aws_route_table_association" "PublicRTS2"{
+    subnet_id = aws_subnet.Publicsubnet2.id
+    route_table_id = aws_route_table.Myroutetable.id
+}
+Create security group
+
+resource "aws_security_group" "allow_ssh" {
+  name        = "terraform-sg"
+  description = "terraform-sg"
+  vpc_id      = aws_vpc.CreateVPC.id
+
+#Create inbound rules
+  ingress {
+    description = "Allow SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow HTTP"
+    protocol    = "tcp"
+    from_port   = 80
+    to_port     = 80
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+#create outbound rules
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+}
+Create an EC2 instance
+
+resource "aws_instance" "wordpress-terraform" {
+  ami                         = "ami-053b0d53c279acc90"
+  instance_type               = "t2.micro"
+  key_name                    = "dove-key"
+  subnet_id                   = aws_subnet.Publicsubnet1.id
+  security_groups             = [aws_security_group.allow_ssh.id]
+  associate_public_ip_address = true
+
+}
+
+#key pair was created manually
+Create RDS subnet, security group and instance.
+
+#Create RDS subnet
+resource "aws_db_subnet_group" "terraform-rds-sub" {
+  name       = "terraform-rds-sub"
+  subnet_ids = [aws_subnet.Privatesubnet1.id, aws_subnet.Privatesubnet2.id]
+}
+
+#Create RDS security group
+resource "aws_security_group" "wordpressrds-sg" {
+  name        = "wordpressrds-sg"
+  description = "Security group for wordpress RDS instance"
+  vpc_id      = aws_vpc.CreateVPC.id
+
+  ingress {
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+}
+
+#Create RDS instance
+
+resource "aws_db_instance" "rds_instance" {
+  engine                    = "mysql"
+  engine_version            = "8.0"
+  identifier                = "wordpressrds"
+  username                  = "techynurse"
+  password                  = "mypasswd"
+  instance_class            = "db.t3.micro"
+  allocated_storage         = 20
+  db_name                   = "wordpress_db"
+  db_subnet_group_name      = aws_db_subnet_group.terraform-rds-sub.name
+  vpc_security_group_ids    = [aws_security_group.wordpressrds-sg.id]
+  skip_final_snapshot       = true
+  final_snapshot_identifier = "mywordpress-snapshot"
+}
