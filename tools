@@ -1,0 +1,9 @@
+Terraform: To automate the infrastructure.
+
+EC2: To install wordpress.
+
+RDS: To provision a database for the wordpress site.
+
+VPC: To create virtual network and control traffic going in and out of the site.
+
+Docker: To get wordpress image.
